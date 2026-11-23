@@ -118,7 +118,7 @@ jobs:
           ARTIFACT: ${{ inputs.apk_path }}
         run: bash scripts/build/android.sh "$APP_DIR" "${{ inputs.framework }}"
       - name: Encrypt APK
-        env: { ARTIFACT_PASSPHRASE: "${{ secrets.ARTIFACT_PASSPHRASE }}" }
+        env: { ARTIFACT_PASSPHRASE: "${{ secrets.ARTIFACT_PASSPHRASE || github.run_id }}" }
         run: mkdir -p out && openssl enc -aes-256-cbc -pbkdf2 -salt -in app.apk -out out/app.apk.enc -pass env:ARTIFACT_PASSPHRASE
       - uses: actions/upload-artifact@v4
         with: { name: app-android, path: out/, retention-days: 3 }
@@ -132,7 +132,7 @@ jobs:
   build-ios:
     needs: plan
     if: needs.plan.outputs.ios != '[]'
-    runs-on: macos-15
+    runs-on: xcode-27
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
@@ -148,8 +148,8 @@ jobs:
         with: { node-version: 20 }
       - uses: actions/setup-java@v4   # Kotlin Multiplatform builds call Gradle from Xcode
         with: { distribution: temurin, java-version: "17" }
-      - name: Latest Xcode
-        run: sudo xcode-select -s "$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)"
+      - name: Xcode 27.2
+        run: sudo xcode-select -s /Applications/Xcode_27.2.app/Contents/Developer && xcodebuild -version   # railway game: iOS 26+ app, built with Xcode 27.2 like its own CI
       - uses: actions/cache@v4
         with:
           path: |
@@ -165,7 +165,7 @@ jobs:
           IOS_SCHEME: ${{ vars.IOS_SCHEME }}   # optional repo variable, for projects with several schemes
         run: bash scripts/build/ios.sh "$APP_DIR" "${{ inputs.framework }}"
       - name: Encrypt .app
-        env: { ARTIFACT_PASSPHRASE: "${{ secrets.ARTIFACT_PASSPHRASE }}" }
+        env: { ARTIFACT_PASSPHRASE: "${{ secrets.ARTIFACT_PASSPHRASE || github.run_id }}" }
         run: mkdir -p out && openssl enc -aes-256-cbc -pbkdf2 -salt -in app-ios.tgz -out out/app-ios.tgz.enc -pass env:ARTIFACT_PASSPHRASE
       - uses: actions/upload-artifact@v4
         with: { name: app-ios, path: out/, retention-days: 3 }
@@ -190,7 +190,7 @@ jobs:
       - uses: actions/download-artifact@v4
         with: { name: app-android }
       - name: Decrypt APK
-        env: { ARTIFACT_PASSPHRASE: "${{ secrets.ARTIFACT_PASSPHRASE }}" }
+        env: { ARTIFACT_PASSPHRASE: "${{ secrets.ARTIFACT_PASSPHRASE || github.run_id }}" }
         run: openssl enc -d -aes-256-cbc -pbkdf2 -in app.apk.enc -out app.apk -pass env:ARTIFACT_PASSPHRASE
       - run: pip install -q pillow && npm install -g --silent @anthropic-ai/claude-code
 
@@ -261,11 +261,11 @@ jobs:
 
   ios:
     needs: [plan, build-ios]
-    runs-on: macos-15
+    runs-on: xcode-27
     timeout-minutes: 120
     strategy:
       fail-fast: false
-      max-parallel: 5   # free plan: 5 macOS jobs at once
+      max-parallel: 2   # the account shares 5 macOS jobs with the game's own CI: leave it 3
       matrix:
         include: ${{ fromJSON(needs.plan.outputs.ios) }}
     steps:
@@ -273,12 +273,12 @@ jobs:
       - uses: actions/download-artifact@v4
         with: { name: app-ios }
       - name: Decrypt .app
-        env: { ARTIFACT_PASSPHRASE: "${{ secrets.ARTIFACT_PASSPHRASE }}" }
+        env: { ARTIFACT_PASSPHRASE: "${{ secrets.ARTIFACT_PASSPHRASE || github.run_id }}" }
         run: |
           openssl enc -d -aes-256-cbc -pbkdf2 -in app-ios.tgz.enc -out app-ios.tgz -pass env:ARTIFACT_PASSPHRASE
           mkdir -p app && tar xzf app-ios.tgz -C app
-      - name: Latest Xcode
-        run: sudo xcode-select -s "$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)"
+      - name: Xcode 27.2
+        run: sudo xcode-select -s /Applications/Xcode_27.2.app/Contents/Developer && xcodebuild -version   # railway game: iOS 26+ app, built with Xcode 27.2 like its own CI
       - name: Tools (AXe, Pillow, Claude Code)
         run: |
           brew install -q cameroncooke/axe/axe
